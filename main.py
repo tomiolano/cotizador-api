@@ -21,50 +21,52 @@ EQUIPOS = {
 
 @app.get("/")
 def bienvenida():
-    return {"mensaje": "¡La API Dockerizada está encendida y optimizada!"}
+    return {"mensaje": "API Online"}
 
+# Bloqueamos absolutamente todo lo visual para ahorrar RAM
 async def optimizar_pagina(page):
-    await page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "media", "font"] else route.continue_())
+    await page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "media", "font", "stylesheet"] else route.continue_())
+
+# Dieta extrema para Chromium (Evita que Render lo apague por exceso de RAM)
+CHROMIUM_ARGS = [
+    "--disable-dev-shm-usage", 
+    "--no-sandbox", 
+    "--disable-setuid-sandbox", 
+    "--disable-gpu", 
+    "--no-zygote", 
+    "--single-process",
+    "--disable-extensions",
+    "--js-flags=--max-old-space-size=256"
+]
 
 async def cotizar_via_cargo(cp_destino: str, equipo: dict):
     try:
         async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True,
-                args=["--disable-dev-shm-usage", "--no-sandbox", "--disable-gpu"]
-            )
+            browser = await p.chromium.launch(headless=True, args=CHROMIUM_ARGS)
             context = await browser.new_context()
             page = await context.new_page()
             await optimizar_pagina(page)
             
             try:
-                # Le damos mucho más tiempo para cargar la web
                 await page.goto("https://viacargo.com.ar/cotizar-envio/", timeout=60000)
-                await page.wait_for_timeout(4000) # Pausa estática para dejar que la página dibuje los botones
-                
-                # Buscamos campos de texto de forma más genérica y esperamos 15 segundos
+                await page.wait_for_timeout(4000)
                 origen_input = page.locator("input[placeholder*='rigen'], input[placeholder*='ORIGEN'], input[id*='origen']").first
                 await origen_input.fill("1264", timeout=15000)
                 await page.wait_for_timeout(1000)
                 await page.keyboard.press("Enter")
                 await page.wait_for_timeout(1000)
-                
                 destino_input = page.locator("input[placeholder*='estino'], input[placeholder*='DESTINO'], input[id*='destino']").first
                 await destino_input.fill(cp_destino, timeout=15000)
                 await page.wait_for_timeout(1000)
                 await page.keyboard.press("Enter")
-                
-                # Bultos y medidas
                 await page.locator("input[name='bultos'], input[id*='bulto']").first.fill("1", timeout=10000)
                 await page.locator("input[name='peso'], input[id*='peso']").first.fill(str(equipo["peso_kg"]))
                 await page.locator("input[name='largo'], input[id*='largo']").first.fill(str(equipo["largo_cm"]))
                 await page.locator("input[name='ancho'], input[id*='ancho']").first.fill(str(equipo["ancho_cm"]))
                 await page.locator("input[name='alto'], input[id*='alto']").first.fill(str(equipo["alto_cm"]))
                 await page.locator("input[name='valor'], input[id*='valor']").first.fill(str(equipo["valor"]))
-                
                 await page.locator("button:has-text('Cotizar'), button:has-text('COTIZAR')").first.click()
-                await page.wait_for_timeout(5000) # Esperar a que calcule
-                
+                await page.wait_for_timeout(5000)
                 precio = await page.evaluate("() => { const match = document.body.innerText.match(/\\$[0-9,.]+/); return match ? match[0] : 'Precio no encontrado en pantalla'; }")
                 return {"transporte": "Vía Cargo", "precio": precio}
             except Exception as e:
@@ -77,10 +79,7 @@ async def cotizar_via_cargo(cp_destino: str, equipo: dict):
 async def cotizar_andreani(cp_destino: str, equipo: dict):
     try:
         async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True,
-                args=["--disable-dev-shm-usage", "--no-sandbox", "--disable-gpu"]
-            )
+            browser = await p.chromium.launch(headless=True, args=CHROMIUM_ARGS)
             context = await browser.new_context()
             page = await context.new_page()
             await optimizar_pagina(page)
@@ -88,29 +87,22 @@ async def cotizar_andreani(cp_destino: str, equipo: dict):
             try:
                 await page.goto("https://www.andreani.com/?tab=cotizar-envio", timeout=60000)
                 await page.wait_for_timeout(4000)
-                
-                # Buscamos el origen
                 origen_input = page.locator("input[placeholder*='Postal'], input[placeholder*='origen'], input[id*='origen']").first
                 await origen_input.fill("1264", timeout=15000)
                 await page.wait_for_timeout(1000)
                 await page.keyboard.press("Enter")
                 await page.wait_for_timeout(1000)
-                
-                # Buscamos el destino (el segundo input de Código Postal)
                 destino_input = page.locator("input[placeholder*='Postal'], input[placeholder*='destino'], input[id*='destino']").nth(1)
                 await destino_input.fill(cp_destino, timeout=15000)
                 await page.wait_for_timeout(1000)
                 await page.keyboard.press("Enter")
-                
                 peso_gramos = equipo["peso_kg"] * 1000
                 await page.locator("input[name='peso'], input[placeholder*='Peso']").first.fill(str(peso_gramos), timeout=10000)
                 await page.locator("input[name='largo'], input[placeholder*='Largo']").first.fill(str(equipo["largo_cm"]))
                 await page.locator("input[name='ancho'], input[placeholder*='Ancho']").first.fill(str(equipo["ancho_cm"]))
                 await page.locator("input[name='alto'], input[placeholder*='Alto']").first.fill(str(equipo["alto_cm"]))
-                
                 await page.locator("button:has-text('Cotizar'), button:has-text('COTIZAR')").first.click()
                 await page.wait_for_timeout(5000)
-                
                 precio = await page.evaluate("() => { const match = document.body.innerText.match(/\\$[0-9,.]+/); return match ? match[0] : 'Precio no encontrado en pantalla'; }")
                 return {"transporte": "Andreani", "precio": precio}
             except Exception as e:
