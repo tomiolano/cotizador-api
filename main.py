@@ -1,7 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from playwright.async_api import async_playwright
-import uvicorn
 import re
 
 app = FastAPI(title="Cotizador Logístico Unificado")
@@ -22,28 +21,16 @@ EQUIPOS = {
 
 @app.get("/")
 def bienvenida():
-    return {"mensaje": "API Online"}
+    return {"mensaje": "API Online v5 - Selectores reales"}
 
 async def optimizar_pagina(page):
     await page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "media", "font", "stylesheet"] else route.continue_())
 
 CHROMIUM_ARGS = [
-    "--disable-dev-shm-usage", "--no-sandbox", "--disable-setuid-sandbox", 
+    "--disable-dev-shm-usage", "--no-sandbox", "--disable-setuid-sandbox",
     "--disable-gpu", "--no-zygote", "--single-process", "--disable-extensions",
     "--js-flags=--max-old-space-size=256"
 ]
-
-# FUNCIÓN INTELIGENTE: Busca la cajita de 3 formas distintas a la vez
-def encontrar_input(page, palabra_clave):
-    # 1. Técnica Angular Material (Para Vía Cargo)
-    loc_angular = page.locator("mat-form-field").filter(has_text=re.compile(palabra_clave, re.IGNORECASE)).locator("input").first
-    # 2. Técnica Clásica
-    loc_clasico = page.locator(f"input[placeholder*='{palabra_clave}' i], input[id*='{palabra_clave}' i], input[name*='{palabra_clave}' i]").first
-    # 3. Técnica por etiqueta visible
-    loc_label = page.get_by_label(re.compile(palabra_clave, re.IGNORECASE)).first
-    
-    # Devuelve el primero que encuentre en la pantalla
-    return loc_angular.or_(loc_clasico).or_(loc_label)
 
 async def cotizar_via_cargo(cp_destino: str, equipo: dict):
     try:
@@ -52,93 +39,44 @@ async def cotizar_via_cargo(cp_destino: str, equipo: dict):
             context = await browser.new_context()
             page = await context.new_page()
             await optimizar_pagina(page)
-            
+
             try:
                 await page.goto("https://viacargo.com.ar/cotizar-envio/", timeout=60000)
-                await page.wait_for_timeout(4000)
-                
-                # Buscamos Origen y Destino con la nueva técnica
-                await encontrar_input(page, "origen").fill("1264", timeout=15000)
-                await page.wait_for_timeout(1000)
-                await page.keyboard.press("Enter")
-                await page.wait_for_timeout(1000)
-                
-                await encontrar_input(page, "destino").fill(cp_destino, timeout=15000)
-                await page.wait_for_timeout(1000)
-                await page.keyboard.press("Enter")
-                
-                # Completar el resto de los datos
-                await encontrar_input(page, "bulto").fill("1", timeout=5000)
-                await encontrar_input(page, "peso").fill(str(equipo["peso_kg"]))
-                await encontrar_input(page, "largo").fill(str(equipo["largo_cm"]))
-                await encontrar_input(page, "ancho").fill(str(equipo["ancho_cm"]))
-                await encontrar_input(page, "alto").fill(str(equipo["alto_cm"]))
-                await encontrar_input(page, "valor").fill(str(equipo["valor"]))
-                
-                # Botón cotizar
-                await page.locator("button:has-text('Cotizar'), button:has-text('COTIZAR')").first.click()
-                await page.wait_for_timeout(6000)
-                
-                precio = await page.evaluate("() => { const match = document.body.innerText.match(/\\$[0-9,.]+/); return match ? match[0] : 'Precio no encontrado en pantalla'; }")
-                return {"transporte": "Vía Cargo", "precio": precio}
-            except Exception as e:
-                return {"transporte": "Vía Cargo", "error": f"Error al navegar: {str(e)}"}
-            finally:
-                await browser.close()
-    except Exception as e:
-        return {"transporte": "Vía Cargo", "error": f"Fallo motor Docker: {str(e)}"}
+                await page.wait_for_timeout(5000)
 
-async def cotizar_andreani(cp_destino: str, equipo: dict):
-    try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True, args=CHROMIUM_ARGS)
-            context = await browser.new_context()
-            page = await context.new_page()
-            await optimizar_pagina(page)
-            
-            try:
-                await page.goto("https://www.andreani.com/?tab=cotizar-envio", timeout=60000)
-                await page.wait_for_timeout(4000)
-                
-                await encontrar_input(page, "origen").fill("1264", timeout=15000)
-                await page.wait_for_timeout(1000)
-                await page.keyboard.press("Enter")
-                await page.wait_for_timeout(1000)
-                
-                await encontrar_input(page, "destino").fill(cp_destino, timeout=15000)
-                await page.wait_for_timeout(1000)
-                await page.keyboard.press("Enter")
-                
-                peso_gramos = equipo["peso_kg"] * 1000
-                await encontrar_input(page, "peso").fill(str(peso_gramos), timeout=5000)
-                await encontrar_input(page, "largo").fill(str(equipo["largo_cm"]))
-                await encontrar_input(page, "ancho").fill(str(equipo["ancho_cm"]))
-                await encontrar_input(page, "alto").fill(str(equipo["alto_cm"]))
-                
-                await page.locator("button:has-text('Cotizar'), button:has-text('COTIZAR')").first.click()
-                await page.wait_for_timeout(6000)
-                
-                precio = await page.evaluate("() => { const match = document.body.innerText.match(/\\$[0-9,.]+/); return match ? match[0] : 'Precio no encontrado en pantalla'; }")
-                return {"transporte": "Andreani", "precio": precio}
-            except Exception as e:
-                return {"transporte": "Andreani", "error": f"Error al navegar: {str(e)}"}
-            finally:
-                await browser.close()
-    except Exception as e:
-        return {"transporte": "Andreani", "error": f"Fallo motor Docker: {str(e)}"}
+                # SELECTORES REALES de Vía Cargo (Angular Material)
+                # mat-input-0 = Origen (autocomplete)
+                await page.locator("#mat-input-0").fill("1264", timeout=15000)
+                await page.wait_for_timeout(1500)
+                # Seleccionar la opción BARRACAS del dropdown
+                await page.locator("mat-option").filter(has_text="BARRACAS").first.click(timeout=5000)
+                await page.wait_for_timeout(500)
 
-@app.head("/cotizar")
-@app.get("/cotizar")
-async def obtener_cotizacion(modelo: str, cp_destino: str):
-    if modelo not in EQUIPOS:
-        raise HTTPException(status_code=404, detail="Modelo no encontrado")
-    equipo = EQUIPOS[modelo]
-    
-    resultado_via_cargo = await cotizar_via_cargo(cp_destino, equipo)
-    resultado_andreani = await cotizar_andreani(cp_destino, equipo)
-    
-    return {
-        "modelo": modelo,
-        "cp_destino": cp_destino,
-        "cotizaciones": [resultado_via_cargo, resultado_andreani]
-    }
+                # mat-input-1 = Destino (autocomplete)
+                await page.locator("#mat-input-1").fill(cp_destino, timeout=10000)
+                await page.wait_for_timeout(1500)
+                await page.locator("mat-option").first.click(timeout=5000)
+                await page.wait_for_timeout(500)
+
+                # mat-input-2 = Bultos, mat-input-3 = Peso, etc.
+                await page.locator("#mat-input-2").fill("1", timeout=5000)
+                await page.locator("#mat-input-3").fill(str(equipo["peso_kg"]))
+                await page.locator("#mat-input-4").fill(str(equipo["largo_cm"]))
+                await page.locator("#mat-input-5").fill(str(equipo["ancho_cm"]))
+                await page.locator("#mat-input-6").fill(str(equipo["alto_cm"]))
+                await page.locator("#mat-input-7").fill(str(equipo["valor"]))
+
+                # Marcar "Pago en origen" (checkbox o radio de Angular Material)
+                pago_origen = page.locator("mat-radio-button, mat-checkbox").filter(has_text=re.compile("origen", re.IGNORECASE)).first
+                await pago_origen.click(timeout=5000)
+
+                # Botón Cotizar
+                await page.locator("button").filter(has_text=re.compile("cotizar", re.IGNORECASE)).first.click(timeout=5000)
+                await page.wait_for_timeout(6000)
+
+                # Extraer todos los precios que aparezcan
+                precios = await page.evaluate("""() => {
+                    const matches = document.body.innerText.match(/\\$\\s?[0-9]{1,3}(?:[.,][0-9]{3})*(?:[.,][0-9]{2})?/g);
+                    return matches ? matches : [];
+                }""")
+                return {"transporte": "Vía Cargo", "precios": precios if precios else "No se encontraron precios"}
