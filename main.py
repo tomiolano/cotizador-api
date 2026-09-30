@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from playwright.async_api import async_playwright
 import uvicorn
+import re
 
 app = FastAPI(title="Cotizador Logístico Unificado")
 
@@ -23,21 +24,26 @@ EQUIPOS = {
 def bienvenida():
     return {"mensaje": "API Online"}
 
-# Bloqueamos absolutamente todo lo visual para ahorrar RAM
 async def optimizar_pagina(page):
     await page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "media", "font", "stylesheet"] else route.continue_())
 
-# Dieta extrema para Chromium (Evita que Render lo apague por exceso de RAM)
 CHROMIUM_ARGS = [
-    "--disable-dev-shm-usage", 
-    "--no-sandbox", 
-    "--disable-setuid-sandbox", 
-    "--disable-gpu", 
-    "--no-zygote", 
-    "--single-process",
-    "--disable-extensions",
+    "--disable-dev-shm-usage", "--no-sandbox", "--disable-setuid-sandbox", 
+    "--disable-gpu", "--no-zygote", "--single-process", "--disable-extensions",
     "--js-flags=--max-old-space-size=256"
 ]
+
+# FUNCIÓN INTELIGENTE: Busca la cajita de 3 formas distintas a la vez
+def encontrar_input(page, palabra_clave):
+    # 1. Técnica Angular Material (Para Vía Cargo)
+    loc_angular = page.locator("mat-form-field").filter(has_text=re.compile(palabra_clave, re.IGNORECASE)).locator("input").first
+    # 2. Técnica Clásica
+    loc_clasico = page.locator(f"input[placeholder*='{palabra_clave}' i], input[id*='{palabra_clave}' i], input[name*='{palabra_clave}' i]").first
+    # 3. Técnica por etiqueta visible
+    loc_label = page.get_by_label(re.compile(palabra_clave, re.IGNORECASE)).first
+    
+    # Devuelve el primero que encuentre en la pantalla
+    return loc_angular.or_(loc_clasico).or_(loc_label)
 
 async def cotizar_via_cargo(cp_destino: str, equipo: dict):
     try:
@@ -50,23 +56,29 @@ async def cotizar_via_cargo(cp_destino: str, equipo: dict):
             try:
                 await page.goto("https://viacargo.com.ar/cotizar-envio/", timeout=60000)
                 await page.wait_for_timeout(4000)
-                origen_input = page.locator("input[placeholder*='rigen'], input[placeholder*='ORIGEN'], input[id*='origen']").first
-                await origen_input.fill("1264", timeout=15000)
+                
+                # Buscamos Origen y Destino con la nueva técnica
+                await encontrar_input(page, "origen").fill("1264", timeout=15000)
                 await page.wait_for_timeout(1000)
                 await page.keyboard.press("Enter")
                 await page.wait_for_timeout(1000)
-                destino_input = page.locator("input[placeholder*='estino'], input[placeholder*='DESTINO'], input[id*='destino']").first
-                await destino_input.fill(cp_destino, timeout=15000)
+                
+                await encontrar_input(page, "destino").fill(cp_destino, timeout=15000)
                 await page.wait_for_timeout(1000)
                 await page.keyboard.press("Enter")
-                await page.locator("input[name='bultos'], input[id*='bulto']").first.fill("1", timeout=10000)
-                await page.locator("input[name='peso'], input[id*='peso']").first.fill(str(equipo["peso_kg"]))
-                await page.locator("input[name='largo'], input[id*='largo']").first.fill(str(equipo["largo_cm"]))
-                await page.locator("input[name='ancho'], input[id*='ancho']").first.fill(str(equipo["ancho_cm"]))
-                await page.locator("input[name='alto'], input[id*='alto']").first.fill(str(equipo["alto_cm"]))
-                await page.locator("input[name='valor'], input[id*='valor']").first.fill(str(equipo["valor"]))
+                
+                # Completar el resto de los datos
+                await encontrar_input(page, "bulto").fill("1", timeout=5000)
+                await encontrar_input(page, "peso").fill(str(equipo["peso_kg"]))
+                await encontrar_input(page, "largo").fill(str(equipo["largo_cm"]))
+                await encontrar_input(page, "ancho").fill(str(equipo["ancho_cm"]))
+                await encontrar_input(page, "alto").fill(str(equipo["alto_cm"]))
+                await encontrar_input(page, "valor").fill(str(equipo["valor"]))
+                
+                # Botón cotizar
                 await page.locator("button:has-text('Cotizar'), button:has-text('COTIZAR')").first.click()
-                await page.wait_for_timeout(5000)
+                await page.wait_for_timeout(6000)
+                
                 precio = await page.evaluate("() => { const match = document.body.innerText.match(/\\$[0-9,.]+/); return match ? match[0] : 'Precio no encontrado en pantalla'; }")
                 return {"transporte": "Vía Cargo", "precio": precio}
             except Exception as e:
@@ -87,22 +99,25 @@ async def cotizar_andreani(cp_destino: str, equipo: dict):
             try:
                 await page.goto("https://www.andreani.com/?tab=cotizar-envio", timeout=60000)
                 await page.wait_for_timeout(4000)
-                origen_input = page.locator("input[placeholder*='Postal'], input[placeholder*='origen'], input[id*='origen']").first
-                await origen_input.fill("1264", timeout=15000)
+                
+                await encontrar_input(page, "origen").fill("1264", timeout=15000)
                 await page.wait_for_timeout(1000)
                 await page.keyboard.press("Enter")
                 await page.wait_for_timeout(1000)
-                destino_input = page.locator("input[placeholder*='Postal'], input[placeholder*='destino'], input[id*='destino']").nth(1)
-                await destino_input.fill(cp_destino, timeout=15000)
+                
+                await encontrar_input(page, "destino").fill(cp_destino, timeout=15000)
                 await page.wait_for_timeout(1000)
                 await page.keyboard.press("Enter")
+                
                 peso_gramos = equipo["peso_kg"] * 1000
-                await page.locator("input[name='peso'], input[placeholder*='Peso']").first.fill(str(peso_gramos), timeout=10000)
-                await page.locator("input[name='largo'], input[placeholder*='Largo']").first.fill(str(equipo["largo_cm"]))
-                await page.locator("input[name='ancho'], input[placeholder*='Ancho']").first.fill(str(equipo["ancho_cm"]))
-                await page.locator("input[name='alto'], input[placeholder*='Alto']").first.fill(str(equipo["alto_cm"]))
+                await encontrar_input(page, "peso").fill(str(peso_gramos), timeout=5000)
+                await encontrar_input(page, "largo").fill(str(equipo["largo_cm"]))
+                await encontrar_input(page, "ancho").fill(str(equipo["ancho_cm"]))
+                await encontrar_input(page, "alto").fill(str(equipo["alto_cm"]))
+                
                 await page.locator("button:has-text('Cotizar'), button:has-text('COTIZAR')").first.click()
-                await page.wait_for_timeout(5000)
+                await page.wait_for_timeout(6000)
+                
                 precio = await page.evaluate("() => { const match = document.body.innerText.match(/\\$[0-9,.]+/); return match ? match[0] : 'Precio no encontrado en pantalla'; }")
                 return {"transporte": "Andreani", "precio": precio}
             except Exception as e:
