@@ -1,9 +1,10 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from playwright.async_api import async_playwright
 import re
 
-app = FastAPI(title="Cotizador Logístico Unificado")
+app = FastAPI(title="Cotizador Logistico Unificado")
 
 app.add_middleware(
     CORSMiddleware,
@@ -33,30 +34,126 @@ CHROMIUM_ARGS = [
 
 @app.get("/")
 def bienvenida():
-    return {"mensaje": "API Online v5 - Selectores reales"}
+    return {"mensaje": "API Online v6 - Con diagnostico"}
 
 
-async def optimizar_pagina(page):
+async def crear_pagina(playwright):
+    browser = await playwright.chromium.launch(headless=True, args=CHROMIUM_ARGS)
+    context = await browser.new_context(
+        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        viewport={"width": 1280, "height": 720},
+    )
+    page = await context.new_page()
     await page.route(
         "**/*",
         lambda route: (
             route.abort()
-            if route.request.resource_type in ["image", "media", "font", "stylesheet"]
+            if route.request.resource_type in ["image", "media", "font"]
             else route.continue_()
         ),
     )
+    return browser, page
+
+
+@app.get("/debug/viacargo", response_class=HTMLResponse)
+async def debug_viacargo():
+    try:
+        async with async_playwright() as p:
+            browser, page = await crear_pagina(p)
+            try:
+                await page.goto("https://viacargo.com.ar/cotizar-envio/", timeout=60000)
+                await page.wait_for_timeout(8000)
+                html = await page.content()
+                return html
+            finally:
+                await browser.close()
+    except Exception as e:
+        return HTMLResponse(content="Error: " + str(e))
+
+
+@app.get("/debug/andreani", response_class=HTMLResponse)
+async def debug_andreani():
+    try:
+        async with async_playwright() as p:
+            browser, page = await crear_pagina(p)
+            try:
+                await page.goto("https://www.andreani.com/?tab=cotizar-envio", timeout=60000)
+                await page.wait_for_timeout(8000)
+                html = await page.content()
+                return html
+            finally:
+                await browser.close()
+    except Exception as e:
+        return HTMLResponse(content="Error: " + str(e))
+
+
+@app.get("/debug/inputs")
+async def debug_inputs():
+    resultados = {}
+    try:
+        async with async_playwright() as p:
+            browser, page = await crear_pagina(p)
+            try:
+                await page.goto("https://viacargo.com.ar/cotizar-envio/", timeout=60000)
+                await page.wait_for_timeout(8000)
+                inputs_vc = await page.evaluate("""() => {
+                    const inputs = document.querySelectorAll('input');
+                    return Array.from(inputs).map((el, i) => ({
+                        indice: i,
+                        id: el.id,
+                        name: el.name,
+                        type: el.type,
+                        placeholder: el.placeholder,
+                        ariaLabel: el.getAttribute('aria-label'),
+                        clase: el.className.substring(0, 80)
+                    }));
+                }""")
+                resultados["viacargo_inputs"] = inputs_vc
+                resultados["viacargo_url"] = page.url
+            except Exception as e:
+                resultados["viacargo_error"] = str(e)
+            finally:
+                await browser.close()
+    except Exception as e:
+        resultados["viacargo_fallo"] = str(e)
+
+    try:
+        async with async_playwright() as p:
+            browser, page = await crear_pagina(p)
+            try:
+                await page.goto("https://www.andreani.com/?tab=cotizar-envio", timeout=60000)
+                await page.wait_for_timeout(8000)
+                inputs_an = await page.evaluate("""() => {
+                    const inputs = document.querySelectorAll('input');
+                    return Array.from(inputs).map((el, i) => ({
+                        indice: i,
+                        id: el.id,
+                        name: el.name,
+                        type: el.type,
+                        placeholder: el.placeholder,
+                        ariaLabel: el.getAttribute('aria-label'),
+                        clase: el.className.substring(0, 80)
+                    }));
+                }""")
+                resultados["andreani_inputs"] = inputs_an
+                resultados["andreani_url"] = page.url
+            except Exception as e:
+                resultados["andreani_error"] = str(e)
+            finally:
+                await browser.close()
+    except Exception as e:
+        resultados["andreani_fallo"] = str(e)
+
+    return resultados
 
 
 async def cotizar_via_cargo(cp_destino: str, equipo: dict):
     try:
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True, args=CHROMIUM_ARGS)
-            context = await browser.new_context()
-            page = await context.new_page()
-            await optimizar_pagina(page)
+            browser, page = await crear_pagina(p)
             try:
                 await page.goto("https://viacargo.com.ar/cotizar-envio/", timeout=60000)
-                await page.wait_for_timeout(5000)
+                await page.wait_for_timeout(8000)
 
                 await page.locator("#mat-input-0").fill("1264", timeout=15000)
                 await page.wait_for_timeout(1500)
@@ -106,13 +203,10 @@ async def cotizar_via_cargo(cp_destino: str, equipo: dict):
 async def cotizar_andreani(cp_destino: str, equipo: dict):
     try:
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True, args=CHROMIUM_ARGS)
-            context = await browser.new_context()
-            page = await context.new_page()
-            await optimizar_pagina(page)
+            browser, page = await crear_pagina(p)
             try:
                 await page.goto("https://www.andreani.com/?tab=cotizar-envio", timeout=60000)
-                await page.wait_for_timeout(5000)
+                await page.wait_for_timeout(8000)
 
                 await page.get_by_label("Desde").fill("1264", timeout=15000)
                 await page.wait_for_timeout(1500)
