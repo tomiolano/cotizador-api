@@ -23,42 +23,47 @@ EQUIPOS = {
 def bienvenida():
     return {"mensaje": "¡La API Dockerizada está encendida y optimizada!"}
 
-# Esta función bloquea imágenes y multimedia para no gastar RAM
 async def optimizar_pagina(page):
     await page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "media", "font"] else route.continue_())
 
 async def cotizar_via_cargo(cp_destino: str, equipo: dict):
     try:
         async with async_playwright() as p:
-            # ESTOS ARGUMENTOS SON CRÍTICOS PARA QUE NO COLAPSE DOCKER
             browser = await p.chromium.launch(
                 headless=True,
                 args=["--disable-dev-shm-usage", "--no-sandbox", "--disable-gpu"]
             )
             context = await browser.new_context()
             page = await context.new_page()
-            await optimizar_pagina(page) # Aplicamos la optimización
+            await optimizar_pagina(page)
             
             try:
-                await page.goto("https://viacargo.com.ar/cotizar-envio/", timeout=30000)
-                await page.wait_for_load_state("networkidle", timeout=30000)
+                # Le damos mucho más tiempo para cargar la web
+                await page.goto("https://viacargo.com.ar/cotizar-envio/", timeout=60000)
+                await page.wait_for_timeout(4000) # Pausa estática para dejar que la página dibuje los botones
                 
-                await page.fill("input[placeholder*='Origen']", "1264", timeout=5000)
-                await page.click("text=BARRACAS (1264) - CAPITAL FEDERAL", timeout=5000)
+                # Buscamos campos de texto de forma más genérica y esperamos 15 segundos
+                origen_input = page.locator("input[placeholder*='rigen'], input[placeholder*='ORIGEN'], input[id*='origen']").first
+                await origen_input.fill("1264", timeout=15000)
+                await page.wait_for_timeout(1000)
+                await page.keyboard.press("Enter")
+                await page.wait_for_timeout(1000)
                 
-                await page.fill("input[placeholder*='Destino']", cp_destino)
+                destino_input = page.locator("input[placeholder*='estino'], input[placeholder*='DESTINO'], input[id*='destino']").first
+                await destino_input.fill(cp_destino, timeout=15000)
+                await page.wait_for_timeout(1000)
                 await page.keyboard.press("Enter")
                 
-                await page.fill("input[name='bultos']", "1")
-                await page.fill("input[name='peso']", str(equipo["peso_kg"]))
-                await page.fill("input[name='largo']", str(equipo["largo_cm"]))
-                await page.fill("input[name='ancho']", str(equipo["ancho_cm"]))
-                await page.fill("input[name='alto']", str(equipo["alto_cm"]))
-                await page.fill("input[name='valor']", str(equipo["valor"]))
+                # Bultos y medidas
+                await page.locator("input[name='bultos'], input[id*='bulto']").first.fill("1", timeout=10000)
+                await page.locator("input[name='peso'], input[id*='peso']").first.fill(str(equipo["peso_kg"]))
+                await page.locator("input[name='largo'], input[id*='largo']").first.fill(str(equipo["largo_cm"]))
+                await page.locator("input[name='ancho'], input[id*='ancho']").first.fill(str(equipo["ancho_cm"]))
+                await page.locator("input[name='alto'], input[id*='alto']").first.fill(str(equipo["alto_cm"]))
+                await page.locator("input[name='valor'], input[id*='valor']").first.fill(str(equipo["valor"]))
                 
-                await page.check("input[name='pago_origen']") 
-                await page.click("button:has-text('Cotizar')")
-                await page.wait_for_timeout(4000)
+                await page.locator("button:has-text('Cotizar'), button:has-text('COTIZAR')").first.click()
+                await page.wait_for_timeout(5000) # Esperar a que calcule
                 
                 precio = await page.evaluate("() => { const match = document.body.innerText.match(/\\$[0-9,.]+/); return match ? match[0] : 'Precio no encontrado en pantalla'; }")
                 return {"transporte": "Vía Cargo", "precio": precio}
@@ -81,23 +86,30 @@ async def cotizar_andreani(cp_destino: str, equipo: dict):
             await optimizar_pagina(page)
             
             try:
-                await page.goto("https://www.andreani.com/?tab=cotizar-envio", timeout=30000)
-                await page.wait_for_load_state("networkidle", timeout=30000)
+                await page.goto("https://www.andreani.com/?tab=cotizar-envio", timeout=60000)
+                await page.wait_for_timeout(4000)
                 
-                await page.fill("input[placeholder*='Código Postal de origen']", "1264", timeout=5000)
-                await page.click("text=1264 - CIUDAD AUTONOMA DE BUENOS AIRES", timeout=5000)
+                # Buscamos el origen
+                origen_input = page.locator("input[placeholder*='Postal'], input[placeholder*='origen'], input[id*='origen']").first
+                await origen_input.fill("1264", timeout=15000)
+                await page.wait_for_timeout(1000)
+                await page.keyboard.press("Enter")
+                await page.wait_for_timeout(1000)
                 
-                await page.fill("input[placeholder*='Código Postal de destino']", cp_destino)
+                # Buscamos el destino (el segundo input de Código Postal)
+                destino_input = page.locator("input[placeholder*='Postal'], input[placeholder*='destino'], input[id*='destino']").nth(1)
+                await destino_input.fill(cp_destino, timeout=15000)
+                await page.wait_for_timeout(1000)
                 await page.keyboard.press("Enter")
                 
                 peso_gramos = equipo["peso_kg"] * 1000
-                await page.fill("input[name='peso']", str(peso_gramos))
-                await page.fill("input[name='largo']", str(equipo["largo_cm"]))
-                await page.fill("input[name='ancho']", str(equipo["ancho_cm"]))
-                await page.fill("input[name='alto']", str(equipo["alto_cm"]))
+                await page.locator("input[name='peso'], input[placeholder*='Peso']").first.fill(str(peso_gramos), timeout=10000)
+                await page.locator("input[name='largo'], input[placeholder*='Largo']").first.fill(str(equipo["largo_cm"]))
+                await page.locator("input[name='ancho'], input[placeholder*='Ancho']").first.fill(str(equipo["ancho_cm"]))
+                await page.locator("input[name='alto'], input[placeholder*='Alto']").first.fill(str(equipo["alto_cm"]))
                 
-                await page.click("button:has-text('Cotizar')")
-                await page.wait_for_timeout(4000)
+                await page.locator("button:has-text('Cotizar'), button:has-text('COTIZAR')").first.click()
+                await page.wait_for_timeout(5000)
                 
                 precio = await page.evaluate("() => { const match = document.body.innerText.match(/\\$[0-9,.]+/); return match ? match[0] : 'Precio no encontrado en pantalla'; }")
                 return {"transporte": "Andreani", "precio": precio}
@@ -108,7 +120,6 @@ async def cotizar_andreani(cp_destino: str, equipo: dict):
     except Exception as e:
         return {"transporte": "Andreani", "error": f"Fallo motor Docker: {str(e)}"}
 
-# Agrego @app.head para que herramientas como Lovable puedan confirmar que el server está vivo sin errores (el error 405 de tus logs)
 @app.head("/cotizar")
 @app.get("/cotizar")
 async def obtener_cotizacion(modelo: str, cp_destino: str):
