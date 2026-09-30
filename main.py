@@ -19,17 +19,26 @@ EQUIPOS = {
     "KPSC2500Pro": {"peso_kg": 32, "largo_cm": 30, "ancho_cm": 35, "alto_cm": 40, "valor": 850000},
 }
 
-# MEJORA: Mensaje de bienvenida para que el link corto no tire error
 @app.get("/")
 def bienvenida():
-    return {"mensaje": "¡La API está encendida! Para usarla, agregale al final de la URL: /cotizar?modelo=LH4300i&cp_destino=2000"}
+    return {"mensaje": "¡La API Dockerizada está encendida y optimizada!"}
+
+# Esta función bloquea imágenes y multimedia para no gastar RAM
+async def optimizar_pagina(page):
+    await page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "media", "font"] else route.continue_())
 
 async def cotizar_via_cargo(cp_destino: str, equipo: dict):
-    # MEJORA: Atrapamos los errores para que no colapse el servidor
     try:
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
+            # ESTOS ARGUMENTOS SON CRÍTICOS PARA QUE NO COLAPSE DOCKER
+            browser = await p.chromium.launch(
+                headless=True,
+                args=["--disable-dev-shm-usage", "--no-sandbox", "--disable-gpu"]
+            )
+            context = await browser.new_context()
+            page = await context.new_page()
+            await optimizar_pagina(page) # Aplicamos la optimización
+            
             try:
                 await page.goto("https://viacargo.com.ar/cotizar-envio/", timeout=30000)
                 await page.wait_for_load_state("networkidle", timeout=30000)
@@ -51,7 +60,6 @@ async def cotizar_via_cargo(cp_destino: str, equipo: dict):
                 await page.click("button:has-text('Cotizar')")
                 await page.wait_for_timeout(4000)
                 
-                # Extracción segura
                 precio = await page.evaluate("() => { const match = document.body.innerText.match(/\\$[0-9,.]+/); return match ? match[0] : 'Precio no encontrado en pantalla'; }")
                 return {"transporte": "Vía Cargo", "precio": precio}
             except Exception as e:
@@ -59,13 +67,19 @@ async def cotizar_via_cargo(cp_destino: str, equipo: dict):
             finally:
                 await browser.close()
     except Exception as e:
-        return {"transporte": "Vía Cargo", "error": "El navegador invisible no pudo iniciar."}
+        return {"transporte": "Vía Cargo", "error": f"Fallo motor Docker: {str(e)}"}
 
 async def cotizar_andreani(cp_destino: str, equipo: dict):
     try:
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
+            browser = await p.chromium.launch(
+                headless=True,
+                args=["--disable-dev-shm-usage", "--no-sandbox", "--disable-gpu"]
+            )
+            context = await browser.new_context()
+            page = await context.new_page()
+            await optimizar_pagina(page)
+            
             try:
                 await page.goto("https://www.andreani.com/?tab=cotizar-envio", timeout=30000)
                 await page.wait_for_load_state("networkidle", timeout=30000)
@@ -92,16 +106,16 @@ async def cotizar_andreani(cp_destino: str, equipo: dict):
             finally:
                 await browser.close()
     except Exception as e:
-        return {"transporte": "Andreani", "error": "El navegador invisible no pudo iniciar."}
+        return {"transporte": "Andreani", "error": f"Fallo motor Docker: {str(e)}"}
 
+# Agrego @app.head para que herramientas como Lovable puedan confirmar que el server está vivo sin errores (el error 405 de tus logs)
+@app.head("/cotizar")
 @app.get("/cotizar")
 async def obtener_cotizacion(modelo: str, cp_destino: str):
     if modelo not in EQUIPOS:
-        raise HTTPException(status_code=404, detail="Modelo no encontrado. Usá LH4300i, GK7000ISE o KPSC2500Pro")
-    
+        raise HTTPException(status_code=404, detail="Modelo no encontrado")
     equipo = EQUIPOS[modelo]
     
-    # MEJORA: Ejecutamos uno DESPUÉS del otro para no colapsar la memoria del servidor gratuito
     resultado_via_cargo = await cotizar_via_cargo(cp_destino, equipo)
     resultado_andreani = await cotizar_andreani(cp_destino, equipo)
     
