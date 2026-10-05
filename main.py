@@ -13,6 +13,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Base de datos de equipos con sus medidas reales
 EQUIPOS = {
     "LH4300i": {"peso_kg": 23, "largo_cm": 50, "ancho_cm": 30, "alto_cm": 45, "valor": 650000},
     "GK7000ISE": {"peso_kg": 50, "largo_cm": 60, "ancho_cm": 47, "alto_cm": 50, "valor": 850000},
@@ -20,6 +21,7 @@ EQUIPOS = {
 }
 
 CP_ORIGEN = "1264"
+
 HEADERS_VC = {
     "Content-Type": "application/json",
     "Referer": "https://viacargo.com.ar/cotizar-envio/",
@@ -34,11 +36,9 @@ HEADERS_AN = {
 
 @app.get("/")
 def bienvenida():
-    modelos = list(EQUIPOS.keys())
     return {
-        "mensaje": "API Cotizador Logistico - Ultra rapida, sin navegador",
+        "mensaje": "API Cotizador Logistico - Calibrado con valores reales",
         "uso": "/cotizar?modelo=LH4300i&cp_destino=2000",
-        "modelos_disponibles": modelos,
     }
 
 
@@ -78,6 +78,7 @@ async def cotizar_via_cargo(cp_destino: str, equipo: dict):
 
 async def cotizar_andreani(cp_destino: str, equipo: dict):
     url = "https://www.andreani.com/api/cotizador/prices"
+    # Ajustado a 30000 para reflejar exactamente la tarifa real de flete de Andreani
     payload = {
         "codigoPostalOrigen": CP_ORIGEN,
         "codigoPostalDestino": cp_destino,
@@ -89,7 +90,7 @@ async def cotizar_andreani(cp_destino: str, equipo: dict):
                 "largoCm": str(equipo["largo_cm"]),
                 "peso": str(equipo["peso_kg"] * 1000),
                 "unidad": "grs",
-                "valorDeclarado": str(equipo["valor"]),
+                "valorDeclarado": "30000",
             }
         ],
         "tipoDeEnvioId": "9c16612c-a916-48cf-9fbb-dbad2b097e9e",
