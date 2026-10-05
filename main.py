@@ -87,7 +87,9 @@ async def cotizar_andreani(cp_destino: str, equipo: dict):
                 "altoCm": str(equipo["alto_cm"]),
                 "anchoCm": str(equipo["ancho_cm"]),
                 "largoCm": str(equipo["largo_cm"]),
-                "pesoGramos": str(equipo["peso_kg"] * 1000),
+                "peso": str(equipo["peso_kg"] * 1000),
+                "unidad": "grs",
+                "valorDeclarado": str(equipo["valor"]),
             }
         ],
         "tipoDeEnvioId": "9c16612c-a916-48cf-9fbb-dbad2b097e9e",
